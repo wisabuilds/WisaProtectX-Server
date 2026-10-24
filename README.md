@@ -1,24 +1,18 @@
 # WisaProtectX-Server
 
-Keybox distribution and automated sync backend for WisaProtectX.
+Sync backend and asset host for WisaProtectX.
 
 ## Endpoints
 
-Served via raw HTTPS:
-
-- `/key`: Base64-encoded active hardware attestation keybox (`keybox.xml`)
-- `/status`: Health check string (`🟢🟢🟢`)
-- `/meta.json`: Active key payload identifier
+- `/key`: Payload data
+- `/status`: Health check
+- `/meta.json`: Asset manifest
 
 ## Automation
 
-A GitHub Actions workflow (`.github/workflows/auto_harvest.yml`) runs on a 6-hour cron:
+Runs via GitHub Actions (`auto_harvest.yml`) on a scheduled workflow.
 
-1. Runs `harvester.py` to check upstream channels and mirrors for new hardware keyboxes.
-2. Validates XML structure, certificate chains, and repairs corrupted algorithm tags.
-3. Automatically commits and pushes changes when an update is found.
-
-To trigger a sync manually, dispatch the workflow from the Actions tab or run:
+Run locally:
 
 ```bash
 python3 harvester.py
