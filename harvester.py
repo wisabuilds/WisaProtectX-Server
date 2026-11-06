@@ -224,11 +224,12 @@ def publish_keybox(validated_xml: str, source_name: str) -> tuple[bool, bool]:
         try:
             with open(KEY_PATH, "r") as f:
                 current_b64 = f.read().strip()
-            current_xml = base64.b64decode(current_b64).decode("utf-8", errors="ignore")
-            if hashlib.sha256(current_xml.encode()).hexdigest() == new_hash:
-                log(f"Keybox from '{source_name}' matches active keybox. No update needed.")
-                set_status("🟢🟢🟢", "Active keybox is up-to-date and verified")
-                return False, True
+            if current_b64:
+                current_xml = base64.b64decode(current_b64).decode("utf-8", errors="ignore")
+                if hashlib.sha256(current_xml.encode()).hexdigest() == new_hash:
+                    log(f"Keybox from '{source_name}' matches active keybox. No update needed.")
+                    set_status("🟢🟢🟢", "Active keybox is up-to-date and verified")
+                    return False, True
         except Exception as e:
             log(f"Notice: Failed to read current keybox ({e}), will overwrite.")
 
@@ -243,35 +244,58 @@ def publish_keybox(validated_xml: str, source_name: str) -> tuple[bool, bool]:
     # 3. Write /meta.json
     filename = f"wisa_key_{new_hash[:8]}.xml"
     with open(META_PATH, "w") as f:
-        f.write(f'{{"filename": "{filename}"}}\n')
+        f.write(f'{{"filename": "{filename}", "revoked": false}}\n')
 
     log(f"🎉 SUCCESS: New verified keybox published from '{source_name}' (ID: {filename})")
     return True, True
 
 
+def tombstone_active_keybox(reason: str):
+    """
+    Tombstones the active keybox when revoked or corrupted so clients do not
+    download or preserve a poisoned keybox. Writes empty payload and signals revocation.
+    """
+    try:
+        with open(KEY_PATH, "w") as f:
+            f.write("")
+        with open(META_PATH, "w") as f:
+            f.write(json.dumps({"filename": "none", "revoked": True, "reason": reason}) + "\n")
+        log(f"Active keybox tombstoned successfully (Reason: {reason})")
+    except Exception as e:
+        log(f"Error while tombstoning active keybox: {e}")
+
+
 def verify_active_keybox(crl: set[int] | None):
     """
     Validates the currently published active keybox.
-    If it is revoked or corrupted, updates /status to reflect downtime.
+    If it is revoked or corrupted, updates /status to reflect downtime
+    and tombstones /key so devices do not download or preserve a poisoned keybox.
     """
     if not os.path.exists(KEY_PATH):
         log("No active keybox found on disk.")
         set_status("🔴🔴🔴", "Missing key payload")
+        tombstone_active_keybox("Missing key payload")
         return
 
     try:
         with open(KEY_PATH, "r") as f:
             current_b64 = f.read().strip()
+        if not current_b64:
+            # Already tombstoned
+            set_status("🔴🔴🔴", "Keybox is currently tombstoned / inactive")
+            return
         current_xml = base64.b64decode(current_b64).decode("utf-8", errors="ignore")
     except Exception as e:
         log(f"Active keybox is unreadable/corrupted: {e}")
         set_status("🔴🔴🔴", "Corrupted key payload")
+        tombstone_active_keybox(f"Corrupted key payload: {e}")
         return
 
     valid, reason = validate_keybox(current_xml, crl)
     if not valid:
         log(f"🚨 ACTIVE KEYBOX IS REVOKED OR INVALID: {reason}")
         set_status("🔴🔴🔴", f"Active keybox revoked: {reason}")
+        tombstone_active_keybox(reason)
     else:
         log("✓ Active keybox verified: unrevoked in Google CRL.")
         set_status("🟢🟢🟢", "Active keybox verified")
